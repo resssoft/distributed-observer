@@ -21,7 +21,7 @@ import (
 const queueLimit = 10000
 
 type Data struct {
-	Items      []Item `json:"items"`
+	ItemsGroup []ItemsGroup `json:"items_group"`
 	dispatcher *mediator.Dispatcher
 	logger     *logger.Logger
 	settings   services.Settings
@@ -29,23 +29,27 @@ type Data struct {
 }
 
 func New(dispatcher *mediator.Dispatcher, logger *logger.Logger, settings services.Settings) *Data {
-	items := make([]Item, 0)
 	logger = logger.With("service", "pinger")
 	return &Data{
 		dispatcher: dispatcher,
 		logger:     logger,
 		settings:   settings,
 		queue:      make(chan Item, queueLimit),
-		Items:      items,
+		ItemsGroup: make([]ItemsGroup, 0),
 	}
+}
+
+func (d *Data) Append(t time.Duration, items ...Item) []ItemsGroup {
+	d.ItemsGroup = append(d.ItemsGroup, ItemsGroup{
+		Timeout: t,
+		Items:   items,
+	})
+	return d.ItemsGroup
 }
 
 func (d *Data) Start(ctx context.Context) {
 	d.logger.Info(ctx, "Start Pinger")
-	d.Items = append(d.Items,
-		Item{url: "127.0.0.1"}.CheckPing(
-			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
-			d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)),
+	d.Append(time.Minute*25,
 		//Item{url: "http://127.0.0.2/"}.CheckStatus(),
 		Item{url: "188.21.21.21"}.CheckPing(
 			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
@@ -53,7 +57,11 @@ func (d *Data) Start(ctx context.Context) {
 		Item{url: "https://example.com/"}.CheckStatus(),
 		Item{url: "https://no-exist-domain-243524523452345234524524.com/"}.CheckStatus(),
 	)
-	d.Send(ctx)
+
+	d.Append(time.Second*55,
+		Item{url: "127.0.0.1"}.CheckPing(
+			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
+			d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)))
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go d.Receiver(ctx)
 	}
@@ -61,19 +69,23 @@ func (d *Data) Start(ctx context.Context) {
 }
 
 func (d *Data) Sender(ctx context.Context) {
-	//TODO: group for different timeout
-	for {
-		select {
-		case <-d.settings.AfterSeconds("OBSERVER_PINGER_SENDER_TIMEOUT_SEC", 15):
-			println("")
-			d.logger.Info(ctx, "send by timeout")
-			d.Send(ctx)
-		}
+	for _, ig := range d.ItemsGroup {
+		igCopy := ig
+		go func() {
+			for {
+				select {
+				case <-time.After(igCopy.Timeout): //d.settings.AfterSeconds("OBSERVER_PINGER_SENDER_TIMEOUT_SEC", 15):
+					println("")
+					d.logger.Info(ctx, "send by timeout")
+					d.Send(ctx, igCopy.Items)
+				}
+			}
+		}()
 	}
 }
 
-func (d *Data) Send(ctx context.Context) {
-	for _, item := range d.Items {
+func (d *Data) Send(ctx context.Context, items []Item) {
+	for _, item := range items {
 		d.logger.Debug(ctx, "sending item", "item", item)
 		d.queue <- item
 	}
@@ -86,7 +98,6 @@ func (d *Data) Receiver(ctx context.Context) {
 		//println("check item", item.url, host)
 		if host != "" {
 			if item.result.ping != nil {
-				//println("!!!!!!!check ping", item.url, host)
 				state, err := d.ping(host,
 					item.result.ping.repeat,
 					item.result.ping.timeout)
@@ -96,9 +107,8 @@ func (d *Data) Receiver(ctx context.Context) {
 					fmt.Sprintf("%v err: %v", state, err),
 				))
 			} else {
-				//println("!!!!!!!check web", item.url, host)
 				state, err := d.web(item)
-				d.logger.Info(ctx, fmt.Sprintf("Received [%s] ping for url [%s] result %s",
+				d.logger.Info(ctx, fmt.Sprintf("Received [%s] web for url [%s] result %s",
 					defaults.Str(item.name, item.url),
 					item.url,
 					fmt.Sprintf("%v err: %v", state, err),
@@ -110,7 +120,7 @@ func (d *Data) Receiver(ctx context.Context) {
 	}
 }
 
-func (d Data) ping(address string, repeat int, timeout time.Duration) (bool, error) {
+func (d *Data) ping(address string, repeat int, timeout time.Duration) (bool, error) {
 	pinger, err := pinger.NewPinger(address)
 	if err != nil {
 		return false, err
@@ -147,7 +157,7 @@ func getHost(address string) string {
 	return urlItem.Host
 }
 
-func (d Data) web(item Item) (bool, string) {
+func (d *Data) web(item Item) (bool, string) {
 	client := &http.Client{}
 	if item.proxy != "" {
 		proxyURL, _ := url.Parse(item.proxy)

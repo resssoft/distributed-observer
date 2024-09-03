@@ -18,7 +18,7 @@ type Item struct {
 
 type ItemsGroup struct {
 	Timeout time.Duration
-	Item    []Item
+	Items   []Item
 }
 
 type ItemResult struct {
