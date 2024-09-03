@@ -1,0 +1,22 @@
+bin/*/*
+bin/*/*/*
+!bin/*/*.yml
+!bin/*/*.service
+!bin/*/*/
+*.log
+*.gob
+
+build/package/*/*
+!build/package/*/build.sh
+http-client.private.env.json
+.idea/*
+/nbproject
+/bin/vpn_manager/config-dev2.yml
+/bin/vpn_telegram_bot/config-dev2.yml
+
+# Generated files
+*_enum.go
+*.pb.go
+*.pb.enum.go
+*.gw.go
+*.swagger.json
