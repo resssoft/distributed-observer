@@ -1,1 +1,3 @@
-# distributed-observer
+# Observer
+
+## Install
