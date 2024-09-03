@@ -12,7 +12,7 @@ import (
 
 type Data struct {
 	dispatcher *mediator.Dispatcher
-	logger     *logger.Logger
+	Logger     *logger.Logger
 	Services   Services
 }
 
@@ -29,7 +29,7 @@ func New() *Data {
 	settingsService := settings.New(dispatcher, loggerService)
 	return &Data{
 		dispatcher: dispatcher,
-		logger:     loggerService,
+		Logger:     loggerService,
 		Services: Services{
 			settings: settingsService,
 			pinger:   pinger.New(dispatcher, loggerService, settingsService),
@@ -38,7 +38,7 @@ func New() *Data {
 }
 
 func (d *Data) Start(ctx context.Context) {
-	println("start manager")
+	d.Logger.Debug(ctx, "start manager")
 	d.Services.pinger.Start(ctx)
 	<-onExit
 }

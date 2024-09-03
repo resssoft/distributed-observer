@@ -17,12 +17,11 @@ func main() {
 		print(settings.Version())
 		os.Exit(0)
 	}
-	if *debugMode {
-		print(settings.Version())
-		os.Exit(0)
-	}
 
 	m := manager.New()
+	if *debugMode {
+		println(settings.Version())
+	}
 	m.Start(context.Background())
 	println("exit")
 }

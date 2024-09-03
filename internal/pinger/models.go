@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 type Item struct {
@@ -15,10 +16,21 @@ type Item struct {
 	result  ItemResult
 }
 
+type ItemsGroup struct {
+	Timeout time.Duration
+	Item    []Item
+}
+
 type ItemResult struct {
-	ping   bool
+	ping   *ItemPingOptions
 	status ItemResultStatus
 	body   string
+}
+
+type ItemPingOptions struct {
+	address string
+	timeout time.Duration
+	repeat  int
 }
 
 type ItemResultStatus struct {
@@ -44,9 +56,13 @@ type Proxy struct {
 	Key   string
 }
 
-func (i Item) CheckPing() Item {
+func (i Item) CheckPing(duration time.Duration, repeat int) Item {
 	i.result = ItemResult{
-		ping: true,
+		ping: &ItemPingOptions{
+			address: i.url,
+			timeout: duration,
+			repeat:  repeat,
+		},
 	}
 	return i
 }
