@@ -9,11 +9,10 @@ import (
 )
 
 type Item struct {
-	name    string
-	url     string
+	Name    string
+	Url     string
 	Request Request
-	proxy   string //TODO: struct with creds
-	result  ItemResult
+	Result  ItemResult
 }
 
 type ItemsGroup struct {
@@ -21,23 +20,29 @@ type ItemsGroup struct {
 	Items   []Item
 }
 
+type ItemTrigger struct {
+	Request Request
+	Timeout time.Duration
+	Items   []Item
+}
+
 type ItemResult struct {
-	ping   *ItemPingOptions
-	status ItemResultStatus
-	body   string
+	Ping   *ItemPingOptions
+	Status ItemResultStatus
+	Body   string
 }
 
 type ItemPingOptions struct {
-	address string
-	timeout time.Duration
-	repeat  int
+	Address string
+	Timeout time.Duration
+	Repeat  int
 }
 
 type ItemResultStatus struct {
-	code int
-	min  int
-	max  int
-	list []int
+	Code int
+	Min  int
+	Max  int
+	List []int
 }
 
 type Request struct {
@@ -45,41 +50,41 @@ type Request struct {
 	URL    string
 	Body   string
 	Header map[string][]string
-	proxy  Proxy
+	Proxy  *Proxy
 }
 
 type Proxy struct {
-	Host  string
-	Port  string
-	Login string
-	Pass  string
-	Key   string
+	Host string
+	Port string
+	User string
+	Pass string
+	Key  string
 }
 
 func (i Item) CheckPing(duration time.Duration, repeat int) Item {
-	i.result = ItemResult{
-		ping: &ItemPingOptions{
-			address: i.url,
-			timeout: duration,
-			repeat:  repeat,
+	i.Result = ItemResult{
+		Ping: &ItemPingOptions{
+			Address: i.Url,
+			Timeout: duration,
+			Repeat:  repeat,
 		},
 	}
 	return i
 }
 
 func (i Item) CheckStatus() Item {
-	i.result = ItemResult{
-		status: ItemResultStatus{
-			min: 200,
-			max: 299,
+	i.Result = ItemResult{
+		Status: ItemResultStatus{
+			Min: 200,
+			Max: 299,
 		},
 	}
 	return i
 }
 
 func (i Item) CheckBody(body string) Item {
-	i.result = ItemResult{
-		body: body,
+	i.Result = ItemResult{
+		Body: body,
 	}
 	return i
 }
@@ -89,7 +94,7 @@ func (i Item) buildRequest() (*http.Request, error) {
 	var err error
 	req := &http.Request{}
 
-	_, err = url.Parse(i.url)
+	_, err = url.Parse(i.Url)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +131,6 @@ func (i Item) buildRequest() (*http.Request, error) {
 	//	Cancel:           nil,
 	//	Response:         nil,
 	//}
-	req, err = http.NewRequest(i.Request.Method, i.url, body)
+	req, err = http.NewRequest(i.Request.Method, i.Url, body)
 	return req, nil
 }

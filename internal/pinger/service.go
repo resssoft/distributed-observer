@@ -18,6 +18,8 @@ import (
 	"observer/pkg/mediator"
 )
 
+//TODO: ping history, count of ping, result history, trigger by good and bad result (+antispam -> notice for change status)
+
 const queueLimit = 10000
 
 type Data struct {
@@ -50,16 +52,16 @@ func (d *Data) Append(t time.Duration, items ...Item) []ItemsGroup {
 func (d *Data) Start(ctx context.Context) {
 	d.logger.Info(ctx, "Start Pinger")
 	d.Append(time.Minute*25,
-		//Item{url: "http://127.0.0.2/"}.CheckStatus(),
-		Item{url: "188.21.21.21"}.CheckPing(
+		//Item{Url: "http://127.0.0.2/"}.CheckStatus(),
+		Item{Url: "188.21.21.21"}.CheckPing(
 			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
 			d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)),
-		Item{url: "https://example.com/"}.CheckStatus(),
-		Item{url: "https://no-exist-domain-243524523452345234524524.com/"}.CheckStatus(),
+		Item{Url: "https://example.com/"}.CheckStatus(),
+		Item{Url: "https://no-exist-domain-243524523452345234524524.com/"}.CheckStatus(),
 	)
 
 	d.Append(time.Second*55,
-		Item{url: "127.0.0.1"}.CheckPing(
+		Item{Url: "127.0.0.1"}.CheckPing(
 			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
 			d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)))
 	for i := 0; i < runtime.NumCPU(); i++ {
@@ -93,29 +95,29 @@ func (d *Data) Send(ctx context.Context, items []Item) {
 
 func (d *Data) Receiver(ctx context.Context) {
 	for item := range d.queue {
-		host := getHost(item.url)
+		host := getHost(item.Url)
 		d.logger.Info(ctx, "receiving item", "host", host)
 		//println("check item", item.url, host)
 		if host != "" {
-			if item.result.ping != nil {
+			if item.Result.Ping != nil {
 				state, err := d.ping(host,
-					item.result.ping.repeat,
-					item.result.ping.timeout)
+					item.Result.Ping.Repeat,
+					item.Result.Ping.Timeout)
 				d.logger.Info(ctx, fmt.Sprintf("Received [%s] ping for url [%s] result %s",
-					defaults.Str(item.name, item.url),
-					item.url,
+					defaults.Str(item.Name, item.Url),
+					item.Url,
 					fmt.Sprintf("%v err: %v", state, err),
 				))
 			} else {
-				state, err := d.web(item)
+				state, err := d.web(ctx, item)
 				d.logger.Info(ctx, fmt.Sprintf("Received [%s] web for url [%s] result %s",
-					defaults.Str(item.name, item.url),
-					item.url,
+					defaults.Str(item.Name, item.Url),
+					item.Url,
 					fmt.Sprintf("%v err: %v", state, err),
 				))
 			}
 		} else {
-			d.logger.Info(ctx, fmt.Sprintf("EMPTY HOST [%s] is empty", item.url), "item", item)
+			d.logger.Info(ctx, fmt.Sprintf("EMPTY HOST [%s] is empty", item.Url), "item", item)
 		}
 	}
 }
@@ -157,13 +159,25 @@ func getHost(address string) string {
 	return urlItem.Host
 }
 
-func (d *Data) web(item Item) (bool, string) {
+func (d *Data) web(ctx context.Context, item Item) (bool, string) {
 	client := &http.Client{}
-	if item.proxy != "" {
-		proxyURL, _ := url.Parse(item.proxy)
+	if item.Request.Proxy != nil {
+		proxyURL, err := url.Parse(item.Request.Proxy.Host)
+		if err != nil {
+			return false, "proxy url invalid: " + err.Error()
+		}
+		if item.Request.Proxy.User != "" {
+			//proxyURL.Host = address
+			proxyURL.User = url.UserPassword(item.Request.Proxy.User, item.Request.Proxy.Pass)
+		}
 		proxy := http.ProxyURL(proxyURL)
 		transport := &http.Transport{Proxy: proxy}
 		client.Transport = transport
+		//clientWithProxy, err := transport.DialContext(ctx, "tcp", item.Request.Proxy.Host)
+		//if nil != err {
+		//	log.Fatalf("Dial: %v", err)
+		//}
+		//client = &clientWithProxy
 	}
 	request, err := item.buildRequest()
 	if err != nil {
@@ -180,14 +194,14 @@ func (d *Data) web(item Item) (bool, string) {
 	if err != nil {
 		return false, "read body err"
 	}
-	if item.result.status.code != 0 && resp.StatusCode == item.result.status.code {
+	if item.Result.Status.Code != 0 && resp.StatusCode == item.Result.Status.Code {
 		return true, ""
 	}
-	if item.result.status.min != 0 && item.result.status.max != 0 &&
-		resp.StatusCode >= item.result.status.min && resp.StatusCode <= item.result.status.max {
+	if item.Result.Status.Min != 0 && item.Result.Status.Max != 0 &&
+		resp.StatusCode >= item.Result.Status.Min && resp.StatusCode <= item.Result.Status.Max {
 		return true, ""
 	}
-	if item.result.body != "" && string(webBody) == item.result.body {
+	if item.Result.Body != "" && string(webBody) == item.Result.Body {
 		return true, ""
 	}
 	return false, ""
