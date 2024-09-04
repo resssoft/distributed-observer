@@ -9,56 +9,56 @@ import (
 )
 
 type Item struct {
-	Name    string
-	Url     string
-	Request Request
-	Result  ItemResult
+	Name    string     `json:"name"`
+	Url     string     `json:"url"`
+	Request Request    `json:"request"`
+	Result  ItemResult `json:"result"`
 }
 
 type ItemsGroup struct {
-	Timeout time.Duration
-	Items   []Item
+	Timeout time.Duration `json:"timeout"`
+	Items   []Item        `json:"items"`
 }
 
 type ItemTrigger struct {
-	Request Request
-	Timeout time.Duration
-	Items   []Item
+	Request Request       `json:"request"`
+	Timeout time.Duration `json:"timeout"`
+	Items   []Item        `json:"items"`
 }
 
 type ItemResult struct {
-	Ping   *ItemPingOptions
-	Status ItemResultStatus
-	Body   string
+	Ping   *ItemPingOptions `json:"ping"`
+	Status ItemResultStatus `json:"status"`
+	Body   string           `json:"body"`
 }
 
 type ItemPingOptions struct {
-	Address string
-	Timeout time.Duration
-	Repeat  int
+	Address string        `json:"address"`
+	Timeout time.Duration `json:"timeout"`
+	Repeat  int           `json:"repeat"`
 }
 
 type ItemResultStatus struct {
-	Code int
-	Min  int
-	Max  int
-	List []int
+	Code int   `json:"code"`
+	Min  int   `json:"min"`
+	Max  int   `json:"max"`
+	List []int `json:"list"`
 }
 
 type Request struct {
-	Method string
-	URL    string
-	Body   string
-	Header map[string][]string
-	Proxy  *Proxy
+	Method string              `json:"method"`
+	URL    string              `json:"url"`
+	Body   string              `json:"body"`
+	Header map[string][]string `json:"header"`
+	Proxy  *Proxy              `json:"proxy"`
 }
 
 type Proxy struct {
-	Host string
-	Port string
-	User string
-	Pass string
-	Key  string
+	Host string `json:"host"`
+	Port string `json:"port"`
+	User string `json:"user"`
+	Pass string `json:"pass"`
+	Key  string `json:"key"`
 }
 
 func (i Item) CheckPing(duration time.Duration, repeat int) Item {
