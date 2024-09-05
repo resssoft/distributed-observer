@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	pinger "github.com/go-ping/ping"
@@ -28,6 +30,8 @@ type Data struct {
 	logger     *logger.Logger
 	settings   services.Settings
 	queue      chan Item
+	history    History
+	mutex      *sync.Mutex
 }
 
 func New(dispatcher *mediator.Dispatcher, logger *logger.Logger, settings services.Settings) *Data {
@@ -38,6 +42,10 @@ func New(dispatcher *mediator.Dispatcher, logger *logger.Logger, settings servic
 		settings:   settings,
 		queue:      make(chan Item, queueLimit),
 		ItemsGroup: make([]ItemsGroup, 0),
+		history: History{
+			Requests: make(map[time.Time]Request),
+		},
+		mutex: &sync.Mutex{},
 	}
 }
 
@@ -52,18 +60,15 @@ func (d *Data) Append(t time.Duration, items ...Item) []ItemsGroup {
 func (d *Data) Start(ctx context.Context) {
 	d.logger.Info(ctx, "Start Pinger")
 	d.Append(time.Minute*25,
-		//Item{Url: "http://127.0.0.2/"}.CheckStatus(),
-		Item{Url: "188.21.21.21"}.CheckPing(
-			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
-			d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)),
-		Item{Url: "https://example.com/"}.CheckStatus(),
-		Item{Url: "https://no-exist-domain-243524523452345234524524.com/"}.CheckStatus(),
+		PingItem("188.21.21.21", d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5), d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)), //some not pinged
+		CheckStatusItem("https://google.com/"),                                   //domain exist, server state successful
+		CheckStatusItem("https://dima.com/"),                                     //domain exist, server state fail
+		CheckStatusItem("https://no-exist-domain-243524523452345234524524.com/"), //domain not exist, server state fail
 	)
 
 	d.Append(time.Second*55,
-		Item{Url: "127.0.0.1"}.CheckPing(
-			d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5),
-			d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)))
+		PingItem("127.0.0.2", d.settings.GetValueSeconds("OBSERVER_PINGER_PING_TIMEOUT_SEC", 5), d.settings.GetValueInt("OBSERVER_PINGER_PING_REPEAT", 3)), //some pinged
+	)
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go d.Receiver(ctx)
 	}
@@ -95,29 +100,29 @@ func (d *Data) Send(ctx context.Context, items []Item) {
 
 func (d *Data) Receiver(ctx context.Context) {
 	for item := range d.queue {
-		host := getHost(item.Url)
-		d.logger.Info(ctx, "receiving item", "host", host)
-		//println("check item", item.url, host)
+		d.logger.Info(ctx, "receiving item", "Name", item.Name)
+		if item.Request.Ping != "" {
+			state, err := d.ping(item.Request.Ping,
+				item.Request.Repeat,
+				item.Request.Timeout)
+			d.logger.Info(ctx, fmt.Sprintf("Received [%s] ping for url [%s] result %s",
+				defaults.Str(item.Name, item.Request.Url),
+				item.Request.Url,
+				fmt.Sprintf("%v err: %v", state, err),
+			))
+			continue
+		}
+		host := getHost(item.Request.Url)
 		if host != "" {
-			if item.Result.Ping != nil {
-				state, err := d.ping(host,
-					item.Result.Ping.Repeat,
-					item.Result.Ping.Timeout)
-				d.logger.Info(ctx, fmt.Sprintf("Received [%s] ping for url [%s] result %s",
-					defaults.Str(item.Name, item.Url),
-					item.Url,
-					fmt.Sprintf("%v err: %v", state, err),
-				))
-			} else {
-				state, err := d.web(ctx, item)
-				d.logger.Info(ctx, fmt.Sprintf("Received [%s] web for url [%s] result %s",
-					defaults.Str(item.Name, item.Url),
-					item.Url,
-					fmt.Sprintf("%v err: %v", state, err),
-				))
-			}
+			result := d.web(ctx, item)
+			d.logger.Info(ctx, fmt.Sprintf("Received [%s] web for url [%s] result %s",
+				defaults.Str(item.Name, item.Request.Url),
+				item.Request.Url,
+				fmt.Sprintf("%v err: %v", result.StatusCode, result.Error),
+			))
+			continue
 		} else {
-			d.logger.Info(ctx, fmt.Sprintf("EMPTY HOST [%s] is empty", item.Url), "item", item)
+			d.logger.Info(ctx, fmt.Sprintf("EMPTY HOST [%s] is empty", item.Request.Url), "item", item)
 		}
 	}
 }
@@ -159,12 +164,13 @@ func getHost(address string) string {
 	return urlItem.Host
 }
 
-func (d *Data) web(ctx context.Context, item Item) (bool, string) {
+func (d *Data) web(ctx context.Context, item Item) ResponseResult {
+	result := ResponseResult{}
 	client := &http.Client{}
 	if item.Request.Proxy != nil {
 		proxyURL, err := url.Parse(item.Request.Proxy.Host)
 		if err != nil {
-			return false, "proxy url invalid: " + err.Error()
+			return result.WithErr("Parse proxy url err: %s", err)
 		}
 		if item.Request.Proxy.User != "" {
 			//proxyURL.Host = address
@@ -181,28 +187,39 @@ func (d *Data) web(ctx context.Context, item Item) (bool, string) {
 	}
 	request, err := item.buildRequest()
 	if err != nil {
-		return false, "build request err: " + err.Error()
+		return result.WithErr("build request err: %s", err)
 	}
 	resp, err := client.Do(request)
 	if err != nil {
-		return false, "request err: " + err.Error()
+		return result.WithErr("request err: %s", err)
 	}
 	if resp == nil {
-		return false, "empty response"
+		return result.SetErr("empty response")
 	}
+	if item.Request.Response.Status.Code != 0 && resp.StatusCode == item.Request.Response.Status.Code {
+		return result
+	}
+	if item.Request.Response.Status.Min != 0 && item.Request.Response.Status.Max != 0 &&
+		resp.StatusCode >= item.Request.Response.Status.Min && resp.StatusCode <= item.Request.Response.Status.Max {
+		return result
+	}
+	result.StatusCode = resp.StatusCode
 	webBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false, "read body err"
+		return result.WithErr("read body err: %s", err)
 	}
-	if item.Result.Status.Code != 0 && resp.StatusCode == item.Result.Status.Code {
-		return true, ""
+	result.Body = string(webBody)
+	if item.Request.Response.Body != nil {
+		if item.Request.Response.Body.Full == result.Body {
+			return result
+		}
+		if strings.Contains(result.Body, item.Request.Response.Body.Contain) {
+			return result
+		}
+		if item.Request.Response.Body.Grep != nil {
+			//TODO: grep
+			return result
+		}
 	}
-	if item.Result.Status.Min != 0 && item.Result.Status.Max != 0 &&
-		resp.StatusCode >= item.Result.Status.Min && resp.StatusCode <= item.Result.Status.Max {
-		return true, ""
-	}
-	if item.Result.Body != "" && string(webBody) == item.Result.Body {
-		return true, ""
-	}
-	return false, ""
+	return result
 }
